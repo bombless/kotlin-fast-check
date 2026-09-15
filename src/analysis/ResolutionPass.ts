@@ -58,6 +58,10 @@ export class ResolutionPass {
   private resolveFunction(reference: SymbolReference, context: ResolutionPassContext): MemberSymbol | Symbol | undefined {
     const receiver = this.resolveReceiver(reference.receiver, context);
     if (receiver) return this.functions.resolveFunction(receiver, reference.name, context);
+
+    const implicitReceiver = context.scope?.get<ResolvedTypeSymbol>("this");
+    if (implicitReceiver) return this.functions.resolveFunction(implicitReceiver, reference.name, context);
+
     return context.projectSymbols?.findFunctionsByName(reference.name)[0];
   }
 
