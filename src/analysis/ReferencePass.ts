@@ -9,6 +9,14 @@ export interface SymbolReference {
   range: SourceRange;
   receiver?: SymbolReference;
   file?: string;
+  lambdaContext?: LambdaContext;
+}
+
+export interface LambdaContext {
+  call: SymbolReference;
+  parameterIndex: number;
+  isTrailing?: boolean;
+  parent?: LambdaContext;
 }
 
 const IDENTIFIERS = ["simple_identifier", "identifier", "type_identifier"];
@@ -59,14 +67,26 @@ function navigationMember(node: KotlinAstNode, file?: string): SymbolReference |
   };
 }
 
+function callReference(node: KotlinAstNode, file?: string, lambdaContext?: LambdaContext): SymbolReference | undefined {
+  const navigation = first(node, ["navigation_expression"]);
+  if (navigation) {
+    const member = navigationMember(navigation, file);
+    return member ? { ...member, lambdaContext } : undefined;
+  }
+  const callee = identifier(first(node, ["simple_identifier", "identifier"]));
+  if (!callee) return undefined;
+  const kind = /^[A-Z]/.test(callee.text) ? "constructor" : "function";
+  return { kind, name: callee.text, range: callee.range, receiver: receiverOf(node, file), file, lambdaContext };
+}
+
 export class ReferencePass {
   collect(ast: KotlinAst, file?: string): SymbolReference[] {
     const refs: SymbolReference[] = [];
-    const visit = (node: KotlinAstNode): void => {
+    const visit = (node: KotlinAstNode, lambdaContext?: LambdaContext): void => {
       if (node.type === "import_header") {
         const raw = node.text.replace(/^import\s+/, "").replace(/;$/, "").trim();
         const alias = raw.match(/^(.*?)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)$/);
-        refs.push({ kind: "import", name: alias?.[2] ?? alias?.[1] ?? raw, range: node.range, file });
+        refs.push({ kind: "import", name: alias?.[2] ?? alias?.[1] ?? raw, range: node.range, file, lambdaContext });
         return;
       }
       if (node.type === "user_type" || node.type === "type_identifier") {
@@ -74,23 +94,107 @@ export class ReferencePass {
         return;
       }
       if (node.type === "call_expression") {
-        const callee = identifier(first(node, ["simple_identifier", "identifier", "navigation_expression"]));
-        if (callee) {
-          const kind = /^[A-Z]/.test(callee.text) ? "constructor" : "function";
-          refs.push({ kind, name: callee.text, range: callee.range, receiver: receiverOf(node, file), file });
+        const navigation = first(node, ["navigation_expression"]);
+        let reference: SymbolReference | undefined;
+        if (navigation) {
+          const member = navigationMember(navigation, file);
+          if (member) {
+            reference = { ...member, lambdaContext };
+            refs.push(reference);
+          }
+        } else {
+          const callee = identifier(first(node, ["simple_identifier", "identifier"]));
+          if (callee) {
+            const kind = /^[A-Z]/.test(callee.text) ? "constructor" : "function";
+            reference = { kind, name: callee.text, range: callee.range, receiver: receiverOf(node, file), file, lambdaContext };
+            refs.push(reference);
+          }
         }
+        const callSuffix = first(node, ["call_suffix"]);
+        const lambdaNodes = [
+          ...(callSuffix ? findLambdaLiterals(callSuffix) : []),
+          ...node.children.filter((child) => child.type === "lambda_literal"),
+        ];
+        const nestedCall = node.children.find((child) => child.type === "call_expression");
+        const lambdaCall = reference ?? (nestedCall ? callReference(nestedCall, file, lambdaContext) : undefined);
+        const lambdaContexts = new Map<KotlinAstNode, LambdaContext>();
+        for (let index = 0; index < lambdaNodes.length; index++) {
+          if (!lambdaCall) continue;
+          lambdaContexts.set(lambdaNodes[index], {
+            call: lambdaCall,
+            parameterIndex: lambdaArgumentIndex(callSuffix!, lambdaNodes[index], index),
+            isTrailing: !((first(callSuffix!, ["value_arguments"])?.children.filter((child) => child.type === "value_argument") ?? []).some((argument) => containsNode(argument, lambdaNodes[index]))),
+            parent: lambdaContext,
+          });
+        }
+        for (const child of node.children) {
+          const childLambda = lambdaNodes.find((candidate) => containsNode(child, candidate));
+          if (childLambda) {
+            visitUntilLambda(child, childLambda, lambdaContexts.get(childLambda)!, lambdaContext, visit);
+          } else {
+            visit(child, lambdaContext);
+          }
+        }
+        return;
       } else if (node.type === "navigation_expression") {
         const member = navigationMember(node, file);
-        if (member) refs.push(member);
+        if (member) refs.push({ ...member, lambdaContext });
       } else if (node.type === "constructor_invocation") {
         const type = first(node, ["user_type", "type_identifier"]) ?? identifier(node);
-        if (type) refs.push({ kind: "constructor", name: type.text, range: type.range, file });
+        if (type) refs.push({ kind: "constructor", name: type.text, range: type.range, file, lambdaContext });
       }
-      for (const child of node.children) visit(child);
+      for (const child of node.children) visit(child, lambdaContext);
     };
     visit(ast.root);
     return refs;
   }
+}
+
+function containsNode(root: KotlinAstNode, target: KotlinAstNode): boolean {
+  if (root === target) return true;
+  return root.children.some((child) => containsNode(child, target));
+}
+
+function visitUntilLambda(
+  node: KotlinAstNode,
+  target: KotlinAstNode,
+  targetContext: LambdaContext,
+  inheritedContext?: LambdaContext,
+  visit?: (node: KotlinAstNode, lambdaContext?: LambdaContext) => void,
+): void {
+  if (node === target) {
+    visit?.(node, targetContext);
+    return;
+  }
+  const child = node.children.find((candidate) => containsNode(candidate, target));
+  if (!child) {
+    visit?.(node, inheritedContext);
+    return;
+  }
+  for (const sibling of node.children) {
+    if (sibling === child) visitUntilLambda(sibling, target, targetContext, inheritedContext, visit);
+    else visit?.(sibling, inheritedContext);
+  }
+}
+
+function findLambdaLiterals(node: KotlinAstNode): KotlinAstNode[] {
+  const result: KotlinAstNode[] = [];
+  const visit = (candidate: KotlinAstNode): void => {
+    if (candidate.type === "lambda_literal") {
+      result.push(candidate);
+      return;
+    }
+    for (const child of candidate.children) visit(child);
+  };
+  visit(node);
+  return result;
+}
+
+function lambdaArgumentIndex(callSuffix: KotlinAstNode, lambda: KotlinAstNode, trailingIndex: number): number {
+  const valueArguments = first(callSuffix, ["value_arguments"]);
+  const argumentsList = valueArguments?.children.filter((child) => child.type === "value_argument") ?? [];
+  const explicitIndex = argumentsList.findIndex((argument) => containsNode(argument, lambda));
+  return explicitIndex >= 0 ? explicitIndex : argumentsList.length + trailingIndex;
 }
 
 export function collectReferences(ast: KotlinAst, file?: string): SymbolReference[] {

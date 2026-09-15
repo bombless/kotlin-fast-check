@@ -38,8 +38,24 @@ function message(code: DiagnosticCode, name: string): string {
 
 export class Diagnostics {
   collect(results: ResolvedReference[]): Diagnostic[] {
+    const unresolvedTypes = new Set(
+      results
+        .filter((result) => !result.symbol && result.reference.kind === "type")
+        .map((result) => `${result.reference.file ?? ""}\u0000${result.reference.name}`),
+    );
     return results.flatMap((result) => {
       if (result.symbol) return [];
+      if (result.reference.kind === "constructor") {
+        const key = `${result.reference.file ?? ""}\u0000${result.reference.name}`;
+        if (unresolvedTypes.has(key)) {
+          const hasDistinctTypeReference = results.some((candidate) => candidate.reference.kind === "type"
+            && !candidate.symbol
+            && `${candidate.reference.file ?? ""}\u0000${candidate.reference.name}` === key
+            && (candidate.reference.range.start.offset !== result.reference.range.start.offset
+              || candidate.reference.range.end.offset !== result.reference.range.end.offset));
+          if (hasDistinctTypeReference) return [];
+        }
+      }
       const code = CODES[result.reference.kind];
       if (!code) return [];
       return [{

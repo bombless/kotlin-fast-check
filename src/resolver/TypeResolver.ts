@@ -4,6 +4,21 @@ import type { SymbolTable } from "../symbols/SymbolTable.js";
 import type { TypeSymbol } from "../symbols/Symbol.js";
 import { ImportResolver } from "./ImportResolver.js";
 
+const KOTLIN_IMPLICIT_IMPORT_PACKAGES = [
+  "kotlin",
+  "kotlin.annotation",
+  "kotlin.collections",
+  "kotlin.comparisons",
+  "kotlin.io",
+  "kotlin.math",
+  "kotlin.jvm",
+  "kotlin.ranges",
+  "kotlin.sequences",
+  "kotlin.text",
+  "java.lang",
+  "java.util",
+];
+
 export interface PrimitiveTypeSymbol { name: string; qualifiedName: string; primitive: true; }
 export type ResolvedTypeSymbol = TypeSymbol | JvmClassSymbol | PrimitiveTypeSymbol;
 
@@ -48,6 +63,10 @@ export class TypeResolver {
         const resolved = context.jvmSymbols.getClass(candidate);
         if (resolved) return resolved;
       }
+      for (const packageName of KOTLIN_IMPLICIT_IMPORT_PACKAGES) {
+        const resolved = context.jvmSymbols.getClass(`${packageName}.${normalized}`);
+        if (resolved) return resolved;
+      }
     }
 
     return undefined;
@@ -61,7 +80,15 @@ export class TypeResolver {
 }
 
 function primitiveType(name: string): PrimitiveTypeSymbol | undefined {
-  const map: Record<string, string> = { Int: "int", Long: "long", Short: "short", Byte: "byte", Boolean: "boolean", Float: "float", Double: "double", Char: "char", Unit: "void", int: "int", long: "long", short: "short", byte: "byte", boolean: "boolean", float: "float", double: "double", char: "char", void: "void" };
+  const map: Record<string, string> = {
+    Int: "int", Long: "long", Short: "short", Byte: "byte", Boolean: "boolean", Float: "float",
+    Double: "double", Char: "char", Unit: "void", int: "int", long: "long", short: "short",
+    byte: "byte", boolean: "boolean", float: "float", double: "double", char: "char", void: "void",
+    String: "kotlin.String", Any: "kotlin.Any", Nothing: "kotlin.Nothing", Number: "kotlin.Number",
+    List: "kotlin.collections.List", MutableList: "kotlin.collections.MutableList", Set: "kotlin.collections.Set",
+    MutableSet: "kotlin.collections.MutableSet", Map: "kotlin.collections.Map", MutableMap: "kotlin.collections.MutableMap",
+    Collection: "kotlin.collections.Collection", Iterable: "kotlin.collections.Iterable", Throwable: "kotlin.Throwable",
+  };
   const qualifiedName = map[name];
   return qualifiedName ? { name, qualifiedName, primitive: true } : undefined;
 }

@@ -71,3 +71,5 @@ The semantic model will remain separate from the parser AST. Project declaration
 8. Optional Gradle classpath discovery
 
 The first semantic milestone is resolving `Activity`, `View`, `MyActivity`, inherited `setContentView`, and reporting `doesNotExist` as an unresolved member/function at its source range.
+
+The checker also has a regression test against the real `android-space-inspector` `MainActivity.kt`; it detects the missing local `DirStat` type definition as `UNRESOLVED_TYPE`. Common Kotlin standard-library types such as `String`, `List`, `ArrayList`, `ArrayDeque`, and `Throwable` are recognized without requiring an external classpath.

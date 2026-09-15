@@ -49,6 +49,18 @@ export function formatDiagnosticJson(diagnostic: Diagnostic): JsonDiagnostic {
   };
 }
 
+export function combineJvmProviders(...providers: Array<JvmSymbolProvider | undefined>): JvmSymbolProvider | undefined {
+  const available = providers.filter((provider): provider is JvmSymbolProvider => provider !== undefined);
+  if (available.length === 0) return undefined;
+  if (available.length === 1) return available[0];
+  return {
+    getClass: (name) => available.map((provider) => provider.getClass(name)).find(Boolean),
+    getMethod: (className, methodName) => available.map((provider) => provider.getMethod(className, methodName)).find(Boolean),
+    findMethods: (methodName, packageName) => available.flatMap((provider) => provider.findMethods(methodName, packageName)),
+    getField: (className, fieldName) => available.map((provider) => provider.getField(className, fieldName)).find(Boolean),
+  };
+}
+
 export function loadClasspath(classpath: string): JvmSymbolProvider {
   const entries = classpath.split(path.delimiter);
   if (!classpath || entries.some((entry) => !entry.trim())) {
@@ -76,6 +88,7 @@ export async function analyzeFile(file: string, jvmSymbols?: JvmSymbolProvider):
     projectSymbols: declarations.symbols,
     jvmSymbols,
     scope: new Scope(),
+    callableParameters: new Map<string, import("../symbols/Symbol.js").Symbol>(),
   };
   const typeResolver = new TypeResolver();
   for (const symbol of declarations.symbols.values()) {
@@ -88,6 +101,7 @@ export async function analyzeFile(file: string, jvmSymbols?: JvmSymbolProvider):
     if (symbol.kind !== SymbolKind.Function) continue;
     const functionSymbol = symbol as FunctionSymbol;
     for (const parameter of functionSymbol.parameters) {
+      if (parameter.type?.includes("->")) context.callableParameters?.set(parameter.name, parameter);
       if (!parameter.type) continue;
       const resolvedType = typeResolver.resolveType(parameter.type, context);
       if (resolvedType) context.scope.define(parameter.name, resolvedType);
@@ -206,11 +220,7 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
   }
 
   let jvmSymbols: JvmSymbolProvider | undefined;
-  if (classpath !== undefined && gradleProject !== undefined) {
-    console.error("--gradle cannot be combined with --classpath");
-    process.exitCode = 2;
-    return;
-  }
+  let gradleSymbols: JvmSymbolProvider | undefined;
   if (classpath !== undefined) {
     try {
       jvmSymbols = loadClasspath(classpath);
@@ -225,7 +235,7 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
     const result = await discoverGradleClasspath(gradleProject);
     if (result.jars.length > 0) {
       try {
-        jvmSymbols = loadClasspath(result.jars.join(path.delimiter));
+        gradleSymbols = loadClasspath(result.jars.join(path.delimiter));
       } catch (error) {
         console.error(error instanceof Error ? error.message : String(error));
         process.exitCode = 2;
@@ -242,11 +252,6 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
       process.exitCode = 2;
       return;
     }
-    if (classpath !== undefined || gradleProject !== undefined) {
-      console.error("--android-sdk/--api cannot be combined with --classpath or --gradle");
-      process.exitCode = 2;
-      return;
-    }
     const sdk = new AndroidSdk(androidSdk);
     if (!sdk.root) {
       console.error("Android SDK not configured; use --android-sdk <path> or set ANDROID_SDK_ROOT/ANDROID_HOME");
@@ -255,17 +260,21 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
     }
     try {
       const index = sdk.load(androidApi);
-      jvmSymbols = {
+      const androidSymbols: JvmSymbolProvider = {
         getClass: (name) => index.getClass(name),
         getMethod: (className, methodName) => index.getMethod(className, methodName),
+        findMethods: (methodName, packageName) => index.findMethods(methodName, packageName),
         getField: (className, fieldName) => index.getField(className, fieldName),
       };
+      jvmSymbols = combineJvmProviders(jvmSymbols, gradleSymbols, androidSymbols);
     } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));
       process.exitCode = 2;
       return;
     }
   }
+
+  jvmSymbols = combineJvmProviders(jvmSymbols, gradleSymbols);
 
   let failed = false;
   const allDiagnostics: Diagnostic[] = [];

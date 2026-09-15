@@ -3,9 +3,17 @@ export interface TypeRef {
   nullable?: boolean;
   arguments?: TypeRef[];
   arrayDimensions?: number;
+  functionReceiver?: TypeRef;
+  functionParameters?: TypeRef[];
+  functionReturnType?: TypeRef;
 }
 
 export function typeRefToString(type: TypeRef): string {
+  if (type.functionReturnType) {
+    const receiver = type.functionReceiver ? `${typeRefToString(type.functionReceiver)}.` : "";
+    const parameters = (type.functionParameters ?? []).map(typeRefToString).join(", ");
+    return `${receiver}(${parameters}) -> ${typeRefToString(type.functionReturnType)}${type.nullable ? "?" : ""}`;
+  }
   const args = type.arguments?.length ? `<${type.arguments.map(typeRefToString).join(", ")}>` : "";
   const arrays = "[]".repeat(type.arrayDimensions ?? 0);
   return `${type.name}${args}${arrays}${type.nullable ? "?" : ""}`;
@@ -17,6 +25,24 @@ export function parseTypeRef(text: string): TypeRef {
   if (value.endsWith("?")) {
     nullable = true;
     value = value.slice(0, -1).trim();
+  }
+
+  const arrow = findTopLevelArrow(value);
+  if (arrow >= 0) {
+    const left = value.slice(0, arrow).trim();
+    const returnType = value.slice(arrow + 2).trim();
+    const parameterStart = left.lastIndexOf("(");
+    if (parameterStart >= 0 && left.endsWith(")")) {
+      const receiverText = left.slice(0, parameterStart).trim().replace(/\.$/, "").trim();
+      const parameterText = left.slice(parameterStart + 1, -1).trim();
+      return {
+        name: "Function",
+        functionReceiver: receiverText ? parseTypeRef(receiverText) : undefined,
+        functionParameters: splitTopLevel(parameterText).filter(Boolean).map(parseTypeRef),
+        functionReturnType: parseTypeRef(returnType),
+        nullable: nullable || undefined,
+      };
+    }
   }
 
   let arrayDimensions = 0;
@@ -51,4 +77,31 @@ export function parseTypeRef(text: string): TypeRef {
     arguments: args.length ? args : undefined,
     arrayDimensions: arrayDimensions || undefined,
   };
+}
+
+function findTopLevelArrow(value: string): number {
+  let depth = 0;
+  for (let index = 0; index < value.length - 1; index++) {
+    const ch = value[index];
+    if (ch === '<' || ch === '(' || ch === '[') depth++;
+    else if (ch === '>' || ch === ')' || ch === ']') depth--;
+    if (ch === '-' && value[index + 1] === '>' && depth === 0) return index;
+  }
+  return -1;
+}
+
+function splitTopLevel(value: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index <= value.length; index++) {
+    const ch = value[index];
+    if (ch === '<' || ch === '(' || ch === '[') depth++;
+    else if (ch === '>' || ch === ')' || ch === ']') depth--;
+    if ((ch === ',' && depth === 0) || index === value.length) {
+      parts.push(value.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+  return parts;
 }

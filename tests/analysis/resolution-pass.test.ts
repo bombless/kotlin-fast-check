@@ -89,6 +89,45 @@ describe("ResolutionPass", () => {
     expect(result.symbol).toBe(inherited);
   });
 
+  it("resolves imported JVM top-level functions", () => {
+    const method = { name: "foo", descriptor: "()V", parameterTypes: [], returnType: "void", accessFlags: 0, static: true, abstract: false, constructor: false };
+    const provider = {
+      getClass: () => undefined,
+      getMethod: () => undefined,
+      findMethods: (name: string, pkg?: string) => name === "foo" && pkg === "pkg" ? [{ className: "pkg.FooKt", method }] : [],
+      getField: () => undefined,
+    };
+    const ctx = {
+      packageName: "", imports: [{ path: "pkg.foo", wildcard: false, range }],
+      projectSymbols: new SymbolTable(), jvmSymbols: provider,
+    };
+    const result = new ResolutionPass().resolve([ref("function", "foo")], ctx)[0];
+    expect(result.symbol).toBe(method);
+  });
+
+  it("resolves Kotlin builtin arrayOf", () => {
+    const symbols = new SymbolTable();
+    const result = new ResolutionPass().resolve([ref("function", "arrayOf")], context(symbols))[0];
+    expect(result.symbol).toMatchObject({ name: "arrayOf", qualifiedName: "kotlin.arrayOf", kind: SymbolKind.Function });
+  });
+
+  it("treats a capitalized callable as a function when no constructor exists", () => {
+    const symbols = new SymbolTable();
+    const fn: FunctionSymbol = {
+      name: "Text", qualifiedName: "pkg.Text", kind: SymbolKind.Function,
+      parameterTypes: [], parameterTypeRefs: [], parameters: [],
+    };
+    symbols.add(fn);
+    const result = new ResolutionPass().resolve([ref("constructor", "Text")], context(symbols))[0];
+    expect(result.symbol).toBe(fn);
+  });
+
+  it("still rejects a genuinely missing constructor", () => {
+    const symbols = new SymbolTable();
+    const result = new ResolutionPass().resolve([ref("constructor", "Missing")], context(symbols))[0];
+    expect(result.symbol).toBeUndefined();
+  });
+
   it("resolves imports and rejects unresolved imports", () => {
     const symbols = new SymbolTable();
     const imported: TypeSymbol = { name: "Foo", qualifiedName: "pkg.Foo", kind: SymbolKind.Class, interfaces: [], members: [] };
