@@ -3,7 +3,8 @@ import type { SymbolTable } from "../symbols/SymbolTable.js";
 import type { TypeSymbol } from "../symbols/Symbol.js";
 import { ImportResolver } from "./ImportResolver.js";
 
-export type ResolvedTypeSymbol = TypeSymbol | JvmClassSymbol;
+export interface PrimitiveTypeSymbol { name: string; qualifiedName: string; primitive: true; }
+export type ResolvedTypeSymbol = TypeSymbol | JvmClassSymbol | PrimitiveTypeSymbol;
 
 export interface ResolutionContext {
   packageName: string;
@@ -18,6 +19,8 @@ export class TypeResolver {
   resolveType(name: string, context: ResolutionContext): ResolvedTypeSymbol | undefined {
     const normalized = name.trim();
     if (!normalized) return undefined;
+    const primitive = primitiveType(normalized);
+    if (primitive) return primitive;
 
     if (normalized.includes(".")) {
       const direct = this.lookup(normalized, context);
@@ -54,4 +57,10 @@ export class TypeResolver {
     if (project && "interfaces" in project) return project as TypeSymbol;
     return context.jvmSymbols?.getClass(name);
   }
+}
+
+function primitiveType(name: string): PrimitiveTypeSymbol | undefined {
+  const map: Record<string, string> = { Int: "int", Long: "long", Short: "short", Byte: "byte", Boolean: "boolean", Float: "float", Double: "double", Char: "char", Unit: "void", int: "int", long: "long", short: "short", byte: "byte", boolean: "boolean", float: "float", double: "double", char: "char", void: "void" };
+  const qualifiedName = map[name];
+  return qualifiedName ? { name, qualifiedName, primitive: true } : undefined;
 }

@@ -35,16 +35,19 @@ export class MemberResolver {
       const getter = type.methods.find((candidate) => candidate.parameterTypes.length === 0 && (candidate.name === `get${capitalize(name)}` || candidate.name === `is${capitalize(name)}`));
       return getter;
     }
+    if (!("members" in type)) return undefined;
     return type.members.find((member) => member.kind === "property" && member.name === name);
   }
 
   private directMethod(type: ResolvedTypeSymbol, name: string, arity?: number): MemberSymbol | undefined {
     if ("methods" in type) return type.methods.find((method) => method.name === name && (arity === undefined || method.parameterTypes.length === arity));
+    if (!("members" in type)) return undefined;
     return type.members.find((member) => member.kind === "function" && member.name === name && (arity === undefined || (member as FunctionSymbol).parameterTypes.length === arity));
   }
 
   private parents(type: ResolvedTypeSymbol, context: ResolutionContext): ResolvedTypeSymbol[] {
-    const names = "superclass" in type ? [type.superclass, ...type.interfaces] : [type.superclass, ...type.interfaces];
+    if (!("superclass" in type) || !("interfaces" in type)) return [];
+    const names = [type.superclass, ...type.interfaces];
     const parents: ResolvedTypeSymbol[] = [];
     for (const name of names) {
       if (!name) continue;
