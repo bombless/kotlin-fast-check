@@ -33,7 +33,7 @@ export class KotlinParser {
 
   constructor() {
     this.parser = new Parser();
-    this.parser.setLanguage(Kotlin as unknown as Parser.Language);
+    this.parser.setLanguage(Kotlin);
   }
 
   parse(source: string): KotlinAst {

@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "tree-sitter": "^0.21.1",
-    "tree-sitter-kotlin": "^0.4.0"
+    "tree-sitter-kotlin": "^0.3.8"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

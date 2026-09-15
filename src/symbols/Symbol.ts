@@ -26,18 +26,35 @@ export interface TypeSymbol extends Symbol {
   superclass?: string;
   interfaces: string[];
   members: Symbol[];
+  typeAliasTarget?: string;
+}
+
+export interface ParameterSymbol extends Symbol {
+  kind: SymbolKind.Parameter;
+  type?: string;
+  typeRef?: import("./TypeRef.js").TypeRef;
+}
+
+export interface ConstructorSymbol extends Symbol {
+  kind: SymbolKind.Constructor;
+  parameterTypes: string[];
+  parameterTypeRefs: import("./TypeRef.js").TypeRef[];
 }
 
 export interface FunctionSymbol extends Symbol {
   kind: SymbolKind.Function;
   parameterTypes: string[];
+  parameterTypeRefs: import("./TypeRef.js").TypeRef[];
+  parameters: ParameterSymbol[];
   returnType?: string;
+  returnTypeRef?: import("./TypeRef.js").TypeRef;
   receiverType?: string;
 }
 
 export interface PropertySymbol extends Symbol {
   kind: SymbolKind.Property | SymbolKind.Field;
   type?: string;
+  typeRef?: import("./TypeRef.js").TypeRef;
 }
 
 export interface ImportSymbol {
