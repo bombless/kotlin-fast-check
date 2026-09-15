@@ -1,5 +1,6 @@
 import Parser from "tree-sitter";
 import Kotlin from "tree-sitter-kotlin";
+import { createHash } from "node:crypto";
 import type { KotlinAst, KotlinAstNode, SourcePosition, SourceRange } from "./Ast.js";
 
 function position(point: { row: number; column: number }, offset: number): SourcePosition {
@@ -48,6 +49,35 @@ export class KotlinParser {
   }
 }
 
+export class ParserCache {
+  private readonly entries = new Map<string, KotlinAst>();
+  private readonly parser: KotlinParser;
+
+  constructor(parser = new KotlinParser()) {
+    this.parser = parser;
+  }
+
+  parse(source: string): KotlinAst {
+    const key = createHash("sha256").update(source, "utf8").digest("hex");
+    const cached = this.entries.get(key);
+    if (cached) return cached;
+
+    const ast = this.parser.parse(source);
+    this.entries.set(key, ast);
+    return ast;
+  }
+
+  clear(): void {
+    this.entries.clear();
+  }
+
+  get size(): number {
+    return this.entries.size;
+  }
+}
+
+const defaultParserCache = new ParserCache();
+
 export function parseKotlin(source: string): KotlinAst {
-  return new KotlinParser().parse(source);
+  return defaultParserCache.parse(source);
 }
