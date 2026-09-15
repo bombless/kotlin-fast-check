@@ -8,6 +8,7 @@ import { collectReferences } from "../analysis/ReferencePass.js";
 import { resolveReferences } from "../analysis/ResolutionPass.js";
 import { AndroidSdk } from "../android/AndroidSdk.js";
 import { parseKotlin } from "../parser/KotlinParser.js";
+import { discoverGradleClasspath } from "../project/GradleClasspath.js";
 import { Scope } from "../resolver/Scope.js";
 import { TypeResolver } from "../resolver/TypeResolver.js";
 import { SymbolKind, type FunctionSymbol } from "../symbols/Symbol.js";
@@ -99,6 +100,7 @@ export async function analyzeFile(file: string, jvmSymbols?: JvmSymbolProvider):
 export async function main(args: string[] = process.argv.slice(2)): Promise<void> {
   let format: "human" | "json" = "human";
   let classpath: string | undefined;
+  let gradleProject: string | undefined;
   let androidSdk: string | undefined;
   let androidApi: number | undefined;
   const files: string[] = [];
@@ -139,6 +141,21 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
     }
     if (arg.startsWith("--classpath=")) {
       classpath = arg.slice("--classpath=".length);
+      continue;
+    }
+    if (arg === "--gradle") {
+      const value = args[index + 1];
+      if (value === undefined) {
+        console.error("Missing --gradle value");
+        process.exitCode = 2;
+        return;
+      }
+      gradleProject = value;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--gradle=")) {
+      gradleProject = arg.slice("--gradle=".length);
       continue;
     }
     if (arg === "--android-sdk") {
@@ -183,12 +200,17 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
   }
 
   if (files.length === 0) {
-    console.error("Usage: kcheck [--format human|json] [--classpath <jar>[<separator><jar>...]] [--android-sdk <sdk>] [--api <level>] <file.kt> [...files]");
+    console.error("Usage: kcheck [--format human|json] [--classpath <jar>[<separator><jar>...]] [--gradle <project>] [--android-sdk <sdk>] [--api <level>] <file.kt> [...files]");
     process.exitCode = 2;
     return;
   }
 
   let jvmSymbols: JvmSymbolProvider | undefined;
+  if (classpath !== undefined && gradleProject !== undefined) {
+    console.error("--gradle cannot be combined with --classpath");
+    process.exitCode = 2;
+    return;
+  }
   if (classpath !== undefined) {
     try {
       jvmSymbols = loadClasspath(classpath);
@@ -199,14 +221,29 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
     }
   }
 
+  if (gradleProject !== undefined) {
+    const result = await discoverGradleClasspath(gradleProject);
+    if (result.jars.length > 0) {
+      try {
+        jvmSymbols = loadClasspath(result.jars.join(path.delimiter));
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exitCode = 2;
+        return;
+      }
+    } else {
+      for (const warning of result.warnings) console.error(warning);
+    }
+  }
+
   if (androidSdk !== undefined || androidApi !== undefined) {
     if (androidApi === undefined) {
       console.error("Missing --api value; specify the Android API level explicitly");
       process.exitCode = 2;
       return;
     }
-    if (classpath !== undefined) {
-      console.error("--android-sdk/--api cannot be combined with --classpath");
+    if (classpath !== undefined || gradleProject !== undefined) {
+      console.error("--android-sdk/--api cannot be combined with --classpath or --gradle");
       process.exitCode = 2;
       return;
     }
