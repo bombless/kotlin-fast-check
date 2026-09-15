@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { JarReader, type JvmSymbolIndex } from "../jvm/JarReader.js";
 
@@ -6,6 +6,10 @@ export class AndroidSdk {
   private readonly cache = new Map<string, JvmSymbolIndex>();
 
   constructor(private readonly sdkRoot = process.env.ANDROID_SDK_ROOT ?? process.env.ANDROID_HOME) {}
+
+  get root(): string | undefined {
+    return this.sdkRoot;
+  }
 
   findAndroidJar(apiLevel?: number): string | undefined {
     if (!this.sdkRoot) return undefined;

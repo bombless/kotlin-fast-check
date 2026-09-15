@@ -6,7 +6,11 @@ import { collectDeclarations } from "../analysis/DeclarationPass.js";
 import { collectDiagnostics, type Diagnostic } from "../analysis/Diagnostics.js";
 import { collectReferences } from "../analysis/ReferencePass.js";
 import { resolveReferences } from "../analysis/ResolutionPass.js";
+import { AndroidSdk } from "../android/AndroidSdk.js";
 import { parseKotlin } from "../parser/KotlinParser.js";
+import { Scope } from "../resolver/Scope.js";
+import { TypeResolver } from "../resolver/TypeResolver.js";
+import { SymbolKind, type FunctionSymbol } from "../symbols/Symbol.js";
 import { IndexedJvmSymbolProvider, JarReader, JvmSymbolIndex, type JvmSymbolProvider } from "../jvm/index.js";
 
 export function formatDiagnostic(diagnostic: Diagnostic): string {
@@ -65,18 +69,38 @@ export async function analyzeFile(file: string, jvmSymbols?: JvmSymbolProvider):
 
   const declarations = collectDeclarations(ast);
   const references = collectReferences(ast, file);
-  const resolved = resolveReferences(references, {
+  const context = {
     packageName: declarations.packageName,
     imports: declarations.imports,
     projectSymbols: declarations.symbols,
     jvmSymbols,
-  });
+    scope: new Scope(),
+  };
+  const typeResolver = new TypeResolver();
+  for (const symbol of declarations.symbols.values()) {
+    if (symbol.kind !== "class") continue;
+    const resolvedType = typeResolver.resolveType(symbol.name, context);
+    if (resolvedType) context.scope.define("this", resolvedType);
+    break;
+  }
+  for (const symbol of declarations.symbols.values()) {
+    if (symbol.kind !== SymbolKind.Function) continue;
+    const functionSymbol = symbol as FunctionSymbol;
+    for (const parameter of functionSymbol.parameters) {
+      if (!parameter.type) continue;
+      const resolvedType = typeResolver.resolveType(parameter.type, context);
+      if (resolvedType) context.scope.define(parameter.name, resolvedType);
+    }
+  }
+  const resolved = resolveReferences(references, context);
   return collectDiagnostics(resolved);
 }
 
 export async function main(args: string[] = process.argv.slice(2)): Promise<void> {
   let format: "human" | "json" = "human";
   let classpath: string | undefined;
+  let androidSdk: string | undefined;
+  let androidApi: number | undefined;
   const files: string[] = [];
 
   for (let index = 0; index < args.length; index += 1) {
@@ -117,12 +141,49 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
       classpath = arg.slice("--classpath=".length);
       continue;
     }
+    if (arg === "--android-sdk") {
+      const value = args[index + 1];
+      if (value === undefined) {
+        console.error("Missing --android-sdk value");
+        process.exitCode = 2;
+        return;
+      }
+      androidSdk = value;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--android-sdk=")) {
+      androidSdk = arg.slice("--android-sdk=".length);
+      continue;
+    }
+    if (arg === "--api") {
+      const value = args[index + 1];
+      const parsed = value === undefined ? NaN : Number(value);
+      if (!Number.isInteger(parsed) || parsed < 1) {
+        console.error("Invalid --api value; expected a positive API level");
+        process.exitCode = 2;
+        return;
+      }
+      androidApi = parsed;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--api=")) {
+      const parsed = Number(arg.slice("--api=".length));
+      if (!Number.isInteger(parsed) || parsed < 1) {
+        console.error("Invalid --api value; expected a positive API level");
+        process.exitCode = 2;
+        return;
+      }
+      androidApi = parsed;
+      continue;
+    }
     if (arg.startsWith("--")) continue;
     files.push(arg);
   }
 
   if (files.length === 0) {
-    console.error("Usage: kcheck [--format human|json] [--classpath <jar>[<separator><jar>...]] <file.kt> [...files]");
+    console.error("Usage: kcheck [--format human|json] [--classpath <jar>[<separator><jar>...]] [--android-sdk <sdk>] [--api <level>] <file.kt> [...files]");
     process.exitCode = 2;
     return;
   }
@@ -131,6 +192,37 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
   if (classpath !== undefined) {
     try {
       jvmSymbols = loadClasspath(classpath);
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exitCode = 2;
+      return;
+    }
+  }
+
+  if (androidSdk !== undefined || androidApi !== undefined) {
+    if (androidApi === undefined) {
+      console.error("Missing --api value; specify the Android API level explicitly");
+      process.exitCode = 2;
+      return;
+    }
+    if (classpath !== undefined) {
+      console.error("--android-sdk/--api cannot be combined with --classpath");
+      process.exitCode = 2;
+      return;
+    }
+    const sdk = new AndroidSdk(androidSdk);
+    if (!sdk.root) {
+      console.error("Android SDK not configured; use --android-sdk <path> or set ANDROID_SDK_ROOT/ANDROID_HOME");
+      process.exitCode = 2;
+      return;
+    }
+    try {
+      const index = sdk.load(androidApi);
+      jvmSymbols = {
+        getClass: (name) => index.getClass(name),
+        getMethod: (className, methodName) => index.getMethod(className, methodName),
+        getField: (className, fieldName) => index.getField(className, fieldName),
+      };
     } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));
       process.exitCode = 2;
