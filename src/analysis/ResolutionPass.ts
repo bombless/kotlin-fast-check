@@ -1,6 +1,6 @@
 import type { ImportSymbol, Symbol } from "../symbols/Symbol.js";
 import type { SymbolTable } from "../symbols/SymbolTable.js";
-import type { JvmSymbolIndex } from "../jvm/index.js";
+import type { JvmSymbolProvider } from "../jvm/JvmSymbolProvider.js";
 import { ConstructorResolver, type ConstructorMatch } from "../resolver/ConstructorResolver.js";
 import { FunctionResolver } from "../resolver/FunctionResolver.js";
 import { ImportResolver } from "../resolver/ImportResolver.js";
@@ -10,7 +10,7 @@ import { TypeResolver, type ResolvedTypeSymbol, type ResolutionContext } from ".
 import type { SymbolReference } from "./ReferencePass.js";
 
 export interface ResolutionPassContext extends ResolutionContext {
-  jvmSymbols?: JvmSymbolIndex;
+  jvmSymbols?: JvmSymbolProvider;
   scope?: Scope;
   imports: ImportSymbol[];
   projectSymbols?: SymbolTable;

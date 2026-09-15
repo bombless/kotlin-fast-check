@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { collectDeclarations } from "../analysis/DeclarationPass.js";
 import { collectDiagnostics, type Diagnostic } from "../analysis/Diagnostics.js";
 import { collectReferences } from "../analysis/ReferencePass.js";
 import { resolveReferences } from "../analysis/ResolutionPass.js";
 import { parseKotlin } from "../parser/KotlinParser.js";
+import { IndexedJvmSymbolProvider, JarReader, JvmSymbolIndex, type JvmSymbolProvider } from "../jvm/index.js";
 
 export function formatDiagnostic(diagnostic: Diagnostic): string {
   const file = diagnostic.file ?? "<unknown>";
@@ -42,7 +44,21 @@ export function formatDiagnosticJson(diagnostic: Diagnostic): JsonDiagnostic {
   };
 }
 
-export async function analyzeFile(file: string): Promise<Diagnostic[]> {
+export function loadClasspath(classpath: string): JvmSymbolProvider {
+  const entries = classpath.split(path.delimiter);
+  if (!classpath || entries.some((entry) => !entry.trim())) {
+    throw new Error("Invalid --classpath value; entries must not be empty");
+  }
+
+  const index = new JvmSymbolIndex();
+  const reader = new JarReader();
+  for (const entry of entries) {
+    index.addAll(reader.read(path.resolve(entry)).values());
+  }
+  return new IndexedJvmSymbolProvider(index);
+}
+
+export async function analyzeFile(file: string, jvmSymbols?: JvmSymbolProvider): Promise<Diagnostic[]> {
   const source = await readFile(file, "utf8");
   const ast = parseKotlin(source);
   if (ast.hasErrors) return [];
@@ -53,12 +69,14 @@ export async function analyzeFile(file: string): Promise<Diagnostic[]> {
     packageName: declarations.packageName,
     imports: declarations.imports,
     projectSymbols: declarations.symbols,
+    jvmSymbols,
   });
   return collectDiagnostics(resolved);
 }
 
 export async function main(args: string[] = process.argv.slice(2)): Promise<void> {
   let format: "human" | "json" = "human";
+  let classpath: string | undefined;
   const files: string[] = [];
 
   for (let index = 0; index < args.length; index += 1) {
@@ -84,20 +102,46 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
       format = value;
       continue;
     }
+    if (arg === "--classpath") {
+      const value = args[index + 1];
+      if (value === undefined) {
+        console.error("Missing --classpath value");
+        process.exitCode = 2;
+        return;
+      }
+      classpath = value;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--classpath=")) {
+      classpath = arg.slice("--classpath=".length);
+      continue;
+    }
     if (arg.startsWith("--")) continue;
     files.push(arg);
   }
 
   if (files.length === 0) {
-    console.error("Usage: kcheck [--format human|json] <file.kt> [...files]");
+    console.error("Usage: kcheck [--format human|json] [--classpath <jar>[<separator><jar>...]] <file.kt> [...files]");
     process.exitCode = 2;
     return;
+  }
+
+  let jvmSymbols: JvmSymbolProvider | undefined;
+  if (classpath !== undefined) {
+    try {
+      jvmSymbols = loadClasspath(classpath);
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exitCode = 2;
+      return;
+    }
   }
 
   let failed = false;
   const allDiagnostics: Diagnostic[] = [];
   for (const file of files) {
-    const diagnostics = await analyzeFile(file);
+    const diagnostics = await analyzeFile(file, jvmSymbols);
     allDiagnostics.push(...diagnostics);
     if (format === "human") {
       for (const diagnostic of diagnostics) console.log(formatDiagnostic(diagnostic));

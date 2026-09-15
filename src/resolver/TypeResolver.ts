@@ -1,4 +1,5 @@
-import type { JvmClassSymbol, JvmSymbolIndex } from "../jvm/index.js";
+import type { JvmClassSymbol } from "../jvm/index.js";
+import type { JvmSymbolProvider } from "../jvm/JvmSymbolProvider.js";
 import type { SymbolTable } from "../symbols/SymbolTable.js";
 import type { TypeSymbol } from "../symbols/Symbol.js";
 import { ImportResolver } from "./ImportResolver.js";
@@ -10,7 +11,7 @@ export interface ResolutionContext {
   packageName: string;
   imports: import("../symbols/Symbol.js").ImportSymbol[];
   projectSymbols?: SymbolTable;
-  jvmSymbols?: JvmSymbolIndex;
+  jvmSymbols?: JvmSymbolProvider;
 }
 
 export class TypeResolver {
