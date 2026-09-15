@@ -9,6 +9,7 @@ import { resolveReferences } from "../analysis/ResolutionPass.js";
 import { AndroidSdk } from "../android/AndroidSdk.js";
 import { parseKotlin } from "../parser/KotlinParser.js";
 import { discoverGradleClasspath } from "../project/GradleClasspath.js";
+import { discoverGradleProject } from "../project/ProjectDiscovery.js";
 import { Scope } from "../resolver/Scope.js";
 import { TypeResolver } from "../resolver/TypeResolver.js";
 import { SymbolKind, type FunctionSymbol } from "../symbols/Symbol.js";
@@ -217,6 +218,14 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
     console.error("Usage: kcheck [--format human|json] [--classpath <jar>[<separator><jar>...]] [--gradle <project>] [--android-sdk <sdk>] [--api <level>] <file.kt> [...files]");
     process.exitCode = 2;
     return;
+  }
+
+  if (gradleProject === undefined) {
+    const discovered = await discoverGradleProject(files[0]);
+    if (discovered) {
+      gradleProject = discovered.root;
+      if (androidApi === undefined) androidApi = discovered.compileSdk;
+    }
   }
 
   let jvmSymbols: JvmSymbolProvider | undefined;
