@@ -1,9 +1,8 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { JarReader, type JvmSymbolIndex } from "../jvm/JarReader.js";
+import { readJar, type JvmSymbolIndex } from "../jvm/JarReader.js";
 
 export class AndroidSdk {
-  private readonly cache = new Map<string, JvmSymbolIndex>();
 
   constructor(private readonly sdkRoot = process.env.ANDROID_SDK_ROOT ?? process.env.ANDROID_HOME) {}
 
@@ -34,11 +33,7 @@ export class AndroidSdk {
   load(apiLevel?: number): JvmSymbolIndex {
     const path = this.findAndroidJar(apiLevel);
     if (!path) throw new Error(apiLevel === undefined ? "Android SDK android.jar not found" : `Android SDK android-${apiLevel} android.jar not found`);
-    const cached = this.cache.get(path);
-    if (cached) return cached;
-    const index = new JarReader().read(path);
-    this.cache.set(path, index);
-    return index;
+    return readJar(path);
   }
 }
 
