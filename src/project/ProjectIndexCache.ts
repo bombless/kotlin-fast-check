@@ -1,12 +1,12 @@
-import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import path from "node:path";
 import { ProjectScanner } from "./ProjectScanner.js";
 import { ProjectIndex } from "./ProjectIndex.js";
 
 interface ProjectFileState {
   file: string;
-  hash: string;
+  mtimeMs: number;
+  size: number;
 }
 
 interface ProjectIndexCacheEntry {
@@ -45,7 +45,10 @@ function sameProjectState(previous: readonly ProjectFileState[], current: readon
   return (
     previous.length === current.length &&
     current.every(
-      (state, index) => state.file === previous[index]?.file && state.hash === previous[index]?.hash,
+      (state, index) =>
+        state.file === previous[index]?.file &&
+        state.mtimeMs === previous[index]?.mtimeMs &&
+        state.size === previous[index]?.size,
     )
   );
 }
@@ -53,10 +56,11 @@ function sameProjectState(previous: readonly ProjectFileState[], current: readon
 async function snapshotProjectState(files: readonly string[]): Promise<ProjectFileState[]> {
   const states = await Promise.all(
     files.map(async (file) => {
-      const source = await readFile(file, "utf8");
+      const metadata = await stat(file);
       return {
         file: path.resolve(file),
-        hash: createHash("sha256").update(source, "utf8").digest("hex"),
+        mtimeMs: metadata.mtimeMs,
+        size: metadata.size,
       };
     }),
   );

@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { collectDeclarations } from "../src/analysis/DeclarationPass.js";
@@ -51,6 +51,34 @@ describe("ProjectIndexCache", () => {
     expect(second).not.toBe(first);
     expect(second.get("Bar")).toBeDefined();
     expect(second.get("Foo")).toBeUndefined();
+  });
+
+  it("invalidates when source mtime changes", async () => {
+    await mkdir(fixtureRoot, { recursive: true });
+    const file = path.join(fixtureRoot, "A.kt");
+    await writeFile(file, "class Foo\n");
+
+    const cache = new ProjectIndexCache();
+    const first = await cache.getOrCreate(fixtureRoot);
+    const now = Date.now();
+    await utimes(file, new Date(now + 1000), new Date(now + 1000));
+    const second = await cache.getOrCreate(fixtureRoot);
+
+    expect(second).not.toBe(first);
+  });
+
+  it("invalidates when source size changes", async () => {
+    await mkdir(fixtureRoot, { recursive: true });
+    const file = path.join(fixtureRoot, "A.kt");
+    await writeFile(file, "class Foo\n");
+
+    const cache = new ProjectIndexCache();
+    const first = await cache.getOrCreate(fixtureRoot);
+    await writeFile(file, "class FooBar\n");
+    const second = await cache.getOrCreate(fixtureRoot);
+
+    expect(second).not.toBe(first);
+    expect(second.get("FooBar")).toBeDefined();
   });
 
   it("invalidates when a source file is added", async () => {
