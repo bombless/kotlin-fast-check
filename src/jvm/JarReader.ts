@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { unzipSync } from "fflate";
 import { readClassFile } from "./ClassFileReader.js";
 import type { JvmClassSymbol } from "./JvmSymbols.js";
+import { JarSymbolCache } from "./JarSymbolCache.js";
 
 export class JvmSymbolIndex {
   private readonly classes = new Map<string, JvmClassSymbol>();
@@ -34,5 +35,7 @@ export class JarReader {
 }
 
 export function readJar(path: string): JvmSymbolIndex {
-  return new JarReader().read(path);
+  return defaultJarSymbolCache.read(path);
 }
+
+const defaultJarSymbolCache = new JarSymbolCache(new JarReader());
