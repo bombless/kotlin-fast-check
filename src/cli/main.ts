@@ -14,6 +14,7 @@ import { Scope } from "../resolver/Scope.js";
 import { TypeResolver } from "../resolver/TypeResolver.js";
 import { SymbolKind, type FunctionSymbol } from "../symbols/Symbol.js";
 import { IndexedJvmSymbolProvider, JarReader, JvmSymbolIndex, type JvmSymbolProvider } from "../jvm/index.js";
+import { perf } from "../util/PerformanceLogger.js";
 
 export function formatDiagnostic(diagnostic: Diagnostic): string {
   const file = diagnostic.file ?? "<unknown>";
@@ -64,6 +65,7 @@ export function combineJvmProviders(...providers: Array<JvmSymbolProvider | unde
 
 export function loadClasspath(classpath: string): JvmSymbolProvider {
   const entries = classpath.split(path.delimiter);
+  const end = perf.start("JarIndex", { jars: entries.length, symbolCache: "not-used" });
   if (!classpath || entries.some((entry) => !entry.trim())) {
     throw new Error("Invalid --classpath value; entries must not be empty");
   }
@@ -71,18 +73,34 @@ export function loadClasspath(classpath: string): JvmSymbolProvider {
   const index = new JvmSymbolIndex();
   const reader = new JarReader();
   for (const entry of entries) {
-    index.addAll(reader.read(path.resolve(entry)).values());
+    const jar = path.resolve(entry);
+    const jarEnd = perf.start("ClassParser", { jar });
+    const jarIndex = reader.read(jar);
+    const parserDurationMs = jarEnd({ classes: [...jarIndex.values()].length });
+    if (parserDurationMs > 500) perf.log("ClassParser.SLOW", { jar, durationMs: parserDurationMs });
+    index.addAll(jarIndex.values());
   }
+  end({ jars: entries.length, symbolCache: "not-used" });
   return new IndexedJvmSymbolProvider(index);
 }
 
 export async function analyzeFile(file: string, jvmSymbols?: JvmSymbolProvider): Promise<Diagnostic[]> {
+  const end = perf.start("Analysis", { file });
   const source = await readFile(file, "utf8");
+  const parseEnd = perf.start("Analysis.parse");
   const ast = parseKotlin(source);
-  if (ast.hasErrors) return [];
+  parseEnd({ hasErrors: ast.hasErrors });
+  if (ast.hasErrors) {
+    end({ diagnostics: 0, result: "parse-errors" });
+    return [];
+  }
 
+  const declarationEnd = perf.start("Analysis.declarationPass");
   const declarations = collectDeclarations(ast);
+  declarationEnd({ symbols: [...declarations.symbols.values()].length });
+  const referenceEnd = perf.start("Analysis.referencePass");
   const references = collectReferences(ast, file);
+  referenceEnd({ references: references.length });
   const context = {
     packageName: declarations.packageName,
     imports: declarations.imports,
@@ -108,11 +126,18 @@ export async function analyzeFile(file: string, jvmSymbols?: JvmSymbolProvider):
       if (resolvedType) context.scope.define(parameter.name, resolvedType);
     }
   }
+  const resolutionEnd = perf.start("Analysis.resolutionPass", { references: references.length });
   const resolved = resolveReferences(references, context);
-  return collectDiagnostics(resolved);
+  resolutionEnd({ resolved: resolved.filter((reference) => reference.symbol !== undefined).length });
+  const diagnosticsEnd = perf.start("Analysis.diagnostics");
+  const diagnostics = collectDiagnostics(resolved);
+  diagnosticsEnd({ diagnostics: diagnostics.length });
+  end({ diagnostics: diagnostics.length });
+  return diagnostics;
 }
 
 export async function main(args: string[] = process.argv.slice(2)): Promise<void> {
+  const cliEnd = perf.start("CLI", { args: args.length });
   let format: "human" | "json" = "human";
   let classpath: string | undefined;
   let gradleProject: string | undefined;
@@ -298,6 +323,7 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
 
   if (format === "json") console.log(JSON.stringify(allDiagnostics.map(formatDiagnosticJson), null, 2));
 
+  cliEnd({ files: files.length, diagnostics: allDiagnostics.length });
   process.exitCode = failed ? 1 : 0;
 }
 

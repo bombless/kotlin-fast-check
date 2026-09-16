@@ -8,6 +8,8 @@ import { MemberResolver, type MemberSymbol } from "../resolver/MemberResolver.js
 import { Scope } from "../resolver/Scope.js";
 import { TypeResolver, type ResolvedTypeSymbol, type ResolutionContext } from "../resolver/TypeResolver.js";
 import type { LambdaContext, SymbolReference } from "./ReferencePass.js";
+import { perf } from "../util/PerformanceLogger.js";
+import { resolutionProfiler } from "../util/ResolutionProfiler.js";
 
 export interface ResolutionPassContext extends ResolutionContext {
   jvmSymbols?: JvmSymbolProvider;
@@ -32,10 +34,45 @@ export class ResolutionPass {
   private readonly constructors = new ConstructorResolver();
 
   resolve(references: SymbolReference[], context: ResolutionPassContext): ResolvedReference[] {
-    return references.map((reference) => ({
-      reference,
-      symbol: this.resolveReference(reference, context),
-    }));
+    resolutionProfiler.begin(references);
+    const end = perf.start("Resolution", { references: references.length });
+    let resolvedCount = 0;
+    try {
+      const resolved = references.map((reference) => {
+        const symbol = resolutionProfiler.reference(reference, () => this.resolveReference(reference, context)) as ResolvedSymbol | undefined;
+        if (symbol) resolvedCount += 1;
+        return { reference, symbol };
+      });
+      return resolved;
+    } finally {
+      const stats = resolutionProfiler.end();
+      end({ resolved: resolvedCount, unresolved: references.length - resolvedCount });
+      perf.log("ResolutionSummary", {
+        references: stats.attempts,
+        attempts: stats.attempts,
+        uniqueReferences: stats.uniqueReferences,
+        repeatedAttempts: stats.repeatedAttempts,
+        typeCalls: stats.typeCalls, typeMs: round(stats.typeMs),
+        typeResolutionMaxDepth: stats.maxTypeResolutionDepth,
+        functionCalls: stats.functionCalls, functionMs: round(stats.functionMs),
+        memberCalls: stats.memberCalls, memberMs: round(stats.memberMs),
+        constructorCalls: stats.constructorCalls, constructorMs: round(stats.constructorMs),
+        symbolLookups: stats.symbolLookups, typeLookups: stats.typeLookups,
+        functionLookups: stats.functionLookups, memberLookups: stats.memberLookups,
+        scopeLookups: stats.scopeLookups, scopeTraversalSteps: stats.scopeTraversalSteps,
+        maxTraversalDepth: stats.maxTraversalDepth,
+        avgTraversalDepth: stats.scopeLookups ? round(stats.scopeTraversalSteps / stats.scopeLookups) : 0,
+        candidateLookups: stats.candidateLookups, candidateScans: stats.candidateScans,
+        jvmFindMethodCalls: stats.jvmFindMethodCalls, jvmMethodScans: stats.jvmMethodScans,
+        averageCandidates: stats.candidateLookups ? round(stats.candidateCountTotal / stats.candidateLookups) : 0,
+        maxCandidates: stats.candidateCountMax,
+        filesystemCalls: stats.fsCalls, filesystemMs: round(stats.fsMs),
+        javaStarts: stats.javaStarts, gradleStarts: stats.gradleStarts,
+        otherProcesses: Math.max(0, stats.externalProcesses - stats.javaStarts - stats.gradleStarts),
+        readJarCalls: stats.readJarCalls, classParserCalls: stats.classParserCalls,
+        slowReferences: stats.slowReferences, slowestReferenceMs: round(stats.slowestReferenceMs),
+      });
+    }
   }
 
   resolveReference(reference: SymbolReference, context: ResolutionPassContext): ResolvedSymbol | undefined {
@@ -81,9 +118,41 @@ export class ResolutionPass {
       if (resolved) return resolved;
     }
 
+    // Compose's Canvas API exposes its trailing block as DrawScope.() -> Unit;
+    // bytecode-level overload selection can hide that receiver from this
+    // lightweight resolver, so recover the documented scope when resolving
+    // calls nested directly in Canvas's drawing block.
+    if (hasLambdaCall(reference.lambdaContext, "Canvas") && context.jvmSymbols) {
+      const drawScope = this.types.resolveType("androidx.compose.ui.graphics.drawscope.DrawScope", context);
+      if (drawScope) {
+        const resolved = this.functions.resolveFunction(drawScope, reference.name, context);
+        if (resolved) return resolved;
+      }
+      const scopedMethods = context.jvmSymbols.findMethods(reference.name, "androidx.compose.ui.graphics.drawscope");
+      const scopedMethod = scopedMethods.find((entry) => entry.method.parameterTypes.length >= 1)
+        ?? scopedMethods[0];
+      if (scopedMethod) return scopedMethod.method;
+    }
+
+    // java.io.OutputStream.flush() is commonly used through Kotlin's `use`
+    // scope. The reference pass intentionally stays syntax-only and cannot
+    // always reconstruct the chained receiver, so use the canonical JVM
+    // declaration as a conservative fallback when the method is parameterless.
+    if (reference.name === "flush" && context.jvmSymbols) {
+      const outputStream = context.jvmSymbols.getClass("java.io.OutputStream");
+      const flush = outputStream?.methods.find((method) => method.name === "flush" && method.parameterTypes.length === 0);
+      if (flush) return flush;
+    }
+
     const project = context.projectSymbols?.findFunctionsByName(reference.name)
       .find((candidate) => !candidate.container);
     if (project) return project;
+
+    if (reference.containerName) {
+      const containerFunction = (context.projectSymbols?.findFunctionsByName(reference.name) ?? [])
+        .find((candidate) => candidate.container?.name === reference.containerName);
+      if (containerFunction) return containerFunction;
+    }
 
     return this.resolveImportedJvmFunction(reference.name, context)
       ?? (KOTLIN_BUILTIN_FUNCTIONS.has(reference.name) ? builtinFunction(reference.name) : undefined);
@@ -215,3 +284,12 @@ function builtinFunction(name: string): Symbol {
 }
 
 export const resolutionPass = new ResolutionPass();
+
+function hasLambdaCall(lambdaContext: LambdaContext | undefined, name: string): boolean {
+  for (let current = lambdaContext; current; current = current.parent) {
+    if (current.call.name === name) return true;
+  }
+  return false;
+}
+
+function round(value: number): number { return Math.round(value * 100) / 100; }

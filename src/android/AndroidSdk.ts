@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { readJar, type JvmSymbolIndex } from "../jvm/JarReader.js";
+import { getJarSymbolCacheStats, readJar, type JvmSymbolIndex } from "../jvm/JarReader.js";
+import { perf } from "../util/PerformanceLogger.js";
 
 export class AndroidSdk {
 
@@ -11,11 +12,17 @@ export class AndroidSdk {
   }
 
   findAndroidJar(apiLevel?: number): string | undefined {
-    if (!this.sdkRoot) return undefined;
+    const end = perf.start("AndroidSDK.findAndroidJar", { sdkRoot: this.sdkRoot, apiLevel });
+    if (!this.sdkRoot) {
+      end({ result: "no-sdk-root" });
+      return undefined;
+    }
     const platformsRoot = join(this.sdkRoot, "platforms");
     if (apiLevel !== undefined) {
       const candidate = join(platformsRoot, `android-${apiLevel}`, "android.jar");
-      return existsSync(candidate) ? candidate : undefined;
+      const result = existsSync(candidate) ? candidate : undefined;
+      end({ result: result ? "found" : "not-found" });
+      return result;
     }
 
     const candidates: { level: number; path: string }[] = [];
@@ -27,13 +34,28 @@ export class AndroidSdk {
       if (existsSync(path)) candidates.push({ level, path });
     }
     candidates.sort((a, b) => b.level - a.level);
-    return candidates[0]?.path;
+    const result = candidates[0]?.path;
+    end({ result: result ? "found" : "not-found", candidateCount: candidates.length });
+    return result;
   }
 
   load(apiLevel?: number): JvmSymbolIndex {
+    const end = perf.start("AndroidSDK.load", { apiLevel });
     const path = this.findAndroidJar(apiLevel);
-    if (!path) throw new Error(apiLevel === undefined ? "Android SDK android.jar not found" : `Android SDK android-${apiLevel} android.jar not found`);
-    return readJar(path);
+    if (!path) {
+      end({ result: "not-found" });
+      throw new Error(apiLevel === undefined ? "Android SDK android.jar not found" : `Android SDK android-${apiLevel} android.jar not found`);
+    }
+    const before = getJarSymbolCacheStats();
+    const index = readJar(path);
+    const after = getJarSymbolCacheStats();
+    perf.log("JarSymbolCache", {
+      jar: path,
+      cacheHits: after.cacheHits - before.cacheHits,
+      cacheMisses: after.cacheMisses - before.cacheMisses,
+    });
+    end({ result: "loaded", jar: path });
+    return index;
   }
 }
 

@@ -10,6 +10,7 @@ export interface SymbolReference {
   receiver?: SymbolReference;
   file?: string;
   lambdaContext?: LambdaContext;
+  containerName?: string;
 }
 
 export interface LambdaContext {
@@ -33,8 +34,9 @@ function identifier(node: KotlinAstNode | undefined): KotlinAstNode | undefined 
 
 function collectType(node: KotlinAstNode, out: SymbolReference[], file?: string): void {
   if (node.type === "user_type") {
-    const nested = first(node, ["type_identifier"]);
-    if (nested?.text.trim()) out.push({ kind: "type", name: nested.text.trim(), range: nested.range, file });
+    const raw = node.text.trim();
+    const name = raw.replace(/<.*$/s, "").replace(/\?$/, "").trim();
+    if (name) out.push({ kind: "type", name, range: node.range, file });
     return;
   }
   if (node.type === "type_identifier") {
@@ -146,8 +148,27 @@ export class ReferencePass {
       for (const child of node.children) visit(child, lambdaContext);
     };
     visit(ast.root);
-    return refs;
+    return annotateContainers(refs, ast.root);
   }
+}
+
+function annotateContainers(refs: SymbolReference[], root: KotlinAstNode): SymbolReference[] {
+  const containers: Array<{ name: string; range: SourceRange }> = [];
+  const walk = (node: KotlinAstNode): void => {
+    if (node.type === "class_declaration") {
+      const name = identifier(node)?.text;
+      if (name) containers.push({ name, range: node.range });
+    }
+    for (const child of node.children) walk(child);
+  };
+  walk(root);
+  return refs.map((reference) => {
+    const containing = containers
+      .filter((container) => container.range.start.offset <= reference.range.start.offset
+        && container.range.end.offset >= reference.range.end.offset)
+      .sort((a, b) => (a.range.end.offset - a.range.start.offset) - (b.range.end.offset - b.range.start.offset))[0];
+    return containing ? { ...reference, containerName: containing.name } : reference;
+  });
 }
 
 function containsNode(root: KotlinAstNode, target: KotlinAstNode): boolean {

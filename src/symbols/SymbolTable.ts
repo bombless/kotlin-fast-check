@@ -1,4 +1,5 @@
 import type { FunctionSymbol, ImportSymbol, PropertySymbol, Symbol, TypeSymbol } from "./Symbol.js";
+import { resolutionProfiler } from "../util/ResolutionProfiler.js";
 
 export class SymbolTable {
   private readonly symbols = new Map<string, Symbol>();
@@ -12,6 +13,7 @@ export class SymbolTable {
   }
 
   get(qualifiedName: string): Symbol | undefined {
+    resolutionProfiler.lookup("symbol");
     return this.symbols.get(qualifiedName);
   }
 
@@ -20,15 +22,21 @@ export class SymbolTable {
   }
 
   findTypesByName(name: string): TypeSymbol[] {
-    return [...this.symbols.values()].filter(
+    const result = [...this.symbols.values()].filter(
       (symbol): symbol is TypeSymbol => symbol.name === name && "interfaces" in symbol,
     );
+    resolutionProfiler.lookup("type");
+    resolutionProfiler.candidates(this.symbols.size, result.length);
+    return result;
   }
 
   findFunctionsByName(name: string): FunctionSymbol[] {
-    return [...this.symbols.values()].filter(
+    const result = [...this.symbols.values()].filter(
       (symbol): symbol is FunctionSymbol => symbol.name === name && symbol.kind === "function",
     );
+    resolutionProfiler.lookup("function");
+    resolutionProfiler.candidates(this.symbols.size, result.length);
+    return result;
   }
 
   findPropertiesByName(name: string): PropertySymbol[] {

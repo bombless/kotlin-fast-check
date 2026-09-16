@@ -3,6 +3,7 @@ import type { JvmSymbolProvider } from "../jvm/JvmSymbolProvider.js";
 import type { SymbolTable } from "../symbols/SymbolTable.js";
 import type { TypeSymbol } from "../symbols/Symbol.js";
 import { ImportResolver } from "./ImportResolver.js";
+import { resolutionProfiler } from "../util/ResolutionProfiler.js";
 
 const KOTLIN_IMPLICIT_IMPORT_PACKAGES = [
   "kotlin",
@@ -33,6 +34,10 @@ export class TypeResolver {
   private readonly imports = new ImportResolver();
 
   resolveType(name: string, context: ResolutionContext): ResolvedTypeSymbol | undefined {
+    return resolutionProfiler.time("type", () => this.resolveTypeImpl(name, context));
+  }
+
+  private resolveTypeImpl(name: string, context: ResolutionContext): ResolvedTypeSymbol | undefined {
     const normalized = name.trim();
     if (!normalized) return undefined;
     const primitive = primitiveType(normalized);
