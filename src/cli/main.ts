@@ -1,7 +1,8 @@
 #!/usr/bin/env node
+import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { collectDeclarations } from "../analysis/DeclarationPass.js";
 import { collectDiagnostics, type Diagnostic } from "../analysis/Diagnostics.js";
 import { collectReferences } from "../analysis/ReferencePass.js";
@@ -13,7 +14,8 @@ import { discoverGradleProject } from "../project/ProjectDiscovery.js";
 import { Scope } from "../resolver/Scope.js";
 import { TypeResolver } from "../resolver/TypeResolver.js";
 import { SymbolKind, type FunctionSymbol } from "../symbols/Symbol.js";
-import { IndexedJvmSymbolProvider, JarReader, JvmSymbolIndex, type JvmSymbolProvider } from "../jvm/index.js";
+import { IndexedJvmSymbolProvider, JvmSymbolIndex, readJar, type JvmSymbolProvider } from "../jvm/index.js";
+import { ClasspathSymbolCache } from "../jvm/ClasspathSymbolCache.js";
 import { perf } from "../util/PerformanceLogger.js";
 
 export function formatDiagnostic(diagnostic: Diagnostic): string {
@@ -63,25 +65,40 @@ export function combineJvmProviders(...providers: Array<JvmSymbolProvider | unde
   };
 }
 
-export function loadClasspath(classpath: string): JvmSymbolProvider {
-  const entries = classpath.split(path.delimiter);
-  const end = perf.start("JarIndex", { jars: entries.length, symbolCache: "not-used" });
+export function loadClasspath(classpath: string, cacheDirectory?: string): JvmSymbolProvider {
+  const entries = classpath.split(path.delimiter).map((entry) => path.resolve(entry));
   if (!classpath || entries.some((entry) => !entry.trim())) {
     throw new Error("Invalid --classpath value; entries must not be empty");
   }
 
-  const index = new JvmSymbolIndex();
-  const reader = new JarReader();
-  for (const entry of entries) {
-    const jar = path.resolve(entry);
-    const jarEnd = perf.start("ClassParser", { jar });
-    const jarIndex = reader.read(jar);
-    const parserDurationMs = jarEnd({ classes: [...jarIndex.values()].length });
-    if (parserDurationMs > 500) perf.log("ClassParser.SLOW", { jar, durationMs: parserDurationMs });
-    index.addAll(jarIndex.values());
+  const end = perf.start("JarIndex", { jars: entries.length, symbolCache: cacheDirectory ? "project-merged" : "none" });
+  const build = () => {
+    const index = new JvmSymbolIndex();
+    for (const jar of entries) {
+      const jarEnd = perf.start("ClassParser", { jar });
+      const jarIndex = readJar(jar);
+      const parserDurationMs = jarEnd({ classes: [...jarIndex.values()].length });
+      if (parserDurationMs > 500) perf.log("ClassParser.SLOW", { jar, durationMs: parserDurationMs });
+      index.addAll(jarIndex.values());
+    }
+    return index;
+  };
+
+  if (!cacheDirectory) {
+    const index = build();
+    end({ jars: entries.length, symbolCache: "none" });
+    return new IndexedJvmSymbolProvider(index);
   }
-  end({ jars: entries.length, symbolCache: "not-used" });
-  return new IndexedJvmSymbolProvider(index);
+
+  const cache = new ClasspathSymbolCache(cacheDirectory);
+  const result = cache.loadOrBuild(entries, build);
+  perf.log("JarIndex.cache", {
+    result: result.hit ? "HIT" : "MISS",
+    jars: entries.length,
+    fingerprint: result.fingerprint,
+  });
+  end({ jars: entries.length, symbolCache: result.hit ? "project-merged-hit" : "project-merged-miss" });
+  return new IndexedJvmSymbolProvider(result.index);
 }
 
 export async function analyzeFile(file: string, jvmSymbols?: JvmSymbolProvider): Promise<Diagnostic[]> {
@@ -269,7 +286,7 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
     const result = await discoverGradleClasspath(gradleProject);
     if (result.jars.length > 0) {
       try {
-        gradleSymbols = loadClasspath(result.jars.join(path.delimiter));
+        gradleSymbols = loadClasspath(result.jars.join(path.delimiter), path.join(result.projectRoot, ".kotlin-fast-check"));
       } catch (error) {
         console.error(error instanceof Error ? error.message : String(error));
         process.exitCode = 2;
@@ -327,9 +344,21 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
   process.exitCode = failed ? 1 : 0;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
-  });
+if (process.argv[1]) {
+  const invokedPath = path.resolve(process.argv[1]);
+  const modulePath = fileURLToPath(import.meta.url);
+  const isEntryPoint = (() => {
+    try {
+      return realpathSync.native(invokedPath).toLowerCase() === realpathSync.native(modulePath).toLowerCase();
+    } catch {
+      return import.meta.url === pathToFileURL(invokedPath).href;
+    }
+  })();
+
+  if (isEntryPoint) {
+    main().catch((error: unknown) => {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exitCode = 1;
+    });
+  }
 }

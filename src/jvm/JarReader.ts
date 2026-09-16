@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { unzipSync } from "fflate";
 import { readClassFile } from "./ClassFileReader.js";
@@ -129,4 +130,7 @@ export function getJarSymbolCacheStats(): { cacheHits: number; cacheMisses: numb
   return defaultJarSymbolCache.stats();
 }
 
-const defaultJarSymbolCache = new JarSymbolCache(new JarReader());
+const defaultJarSymbolCache = new JarSymbolCache(
+  new JarReader(),
+  process.env.KFC_CACHE_DIR ? resolve(process.env.KFC_CACHE_DIR) : undefined,
+);
