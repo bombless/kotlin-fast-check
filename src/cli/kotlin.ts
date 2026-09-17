@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-import { readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { KotlinInterpreter } from "../interpreter/KotlinInterpreter.js";
 
 async function readStdin(): Promise<string> {
   if (process.stdin.isTTY) return "";
-  return readFile(0, "utf8");
+  return readFileSync(0, "utf8");
 }
 
 async function main(): Promise<void> {
