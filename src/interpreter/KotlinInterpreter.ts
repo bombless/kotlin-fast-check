@@ -123,6 +123,7 @@ export class KotlinInterpreter {
     this.output.length = 0; this.functions.clear();
     this.collectFunctions(source);
     this.executeStatements(this.stripFunctions(source), new Map(this.globals));
+    if (this.functions.has("main")) this.invoke("main", []);
     return [...this.output];
   }
 
