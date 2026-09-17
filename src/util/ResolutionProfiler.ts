@@ -8,6 +8,7 @@ export interface ResolutionProfilerSnapshot {
   functionCalls: number; functionMs: number; memberCalls: number; memberMs: number;
   constructorCalls: number; constructorMs: number; scopeLookups: number; scopeTraversalSteps: number;
   maxTraversalDepth: number; candidateLookups: number; candidateScans: number;
+  candidateScanBySource: Record<string, number>;
   candidateCountTotal: number; candidateCountMax: number; jvmFindMethodCalls: number; jvmMethodScans: number;
   scopeSymbolLookups: number; symbolLookups: number;
   typeLookups: number; memberLookups: number; functionLookups: number; fsCalls: number; fsMs: number;
@@ -84,10 +85,11 @@ class ResolutionProfiler {
     this.snapshot.jvmMethodScans += scanned;
   }
 
-  candidates(scanned: number, candidateCount: number): void {
+  candidates(scanned: number, candidateCount: number, source = "other"): void {
     if (!this.isActive()) return;
     this.snapshot.candidateLookups += 1;
     this.snapshot.candidateScans += scanned;
+    this.snapshot.candidateScanBySource[source] = (this.snapshot.candidateScanBySource[source] ?? 0) + scanned;
     this.snapshot.candidateCountTotal += candidateCount;
     this.snapshot.candidateCountMax = Math.max(this.snapshot.candidateCountMax, candidateCount);
   }
@@ -109,6 +111,7 @@ class ResolutionProfiler {
     return { typeCalls: 0, typeMs: 0, typeResolutionDepth: 0, maxTypeResolutionDepth: 0,
       functionCalls: 0, functionMs: 0, memberCalls: 0, memberMs: 0, constructorCalls: 0, constructorMs: 0,
       scopeLookups: 0, scopeTraversalSteps: 0, maxTraversalDepth: 0, candidateLookups: 0, candidateScans: 0,
+      candidateScanBySource: {},
       candidateCountTotal: 0, candidateCountMax: 0, jvmFindMethodCalls: 0, jvmMethodScans: 0,
       scopeSymbolLookups: 0, symbolLookups: 0,
       typeLookups: 0, memberLookups: 0, functionLookups: 0, fsCalls: 0, fsMs: 0, javaStarts: 0, gradleStarts: 0,

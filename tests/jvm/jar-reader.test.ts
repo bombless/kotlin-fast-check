@@ -35,6 +35,8 @@ describe("JarReader", () => {
     const index = new JvmSymbolIndex();
     index.addAll([classA, classB]);
 
+    expect(index.getClasses("pkg", "A")).toEqual([classA]);
+    expect(index.getClasses("pkg", "Missing")).toEqual([]);
     expect(index.findMethods("foo").map(({ className, method }) => `${className}.${method.name}`))
       .toEqual(["pkg.A.foo", "pkg.B.foo-impl", "pkg.B.foo"]);
     expect(index.findMethods("foo", "pkg")).toHaveLength(3);
