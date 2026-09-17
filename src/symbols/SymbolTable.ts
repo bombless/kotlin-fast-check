@@ -26,7 +26,7 @@ export class SymbolTable {
       (symbol): symbol is TypeSymbol => symbol.name === name && "interfaces" in symbol,
     );
     resolutionProfiler.lookup("type");
-    resolutionProfiler.candidates(this.symbols.size, result.length);
+    resolutionProfiler.candidates(this.symbols.size, result.length, "symbolTable.type");
     return result;
   }
 
@@ -35,7 +35,7 @@ export class SymbolTable {
       (symbol): symbol is FunctionSymbol => symbol.name === name && symbol.kind === "function",
     );
     resolutionProfiler.lookup("function");
-    resolutionProfiler.candidates(this.symbols.size, result.length);
+    resolutionProfiler.candidates(this.symbols.size, result.length, "symbolTable.function");
     return result;
   }
 

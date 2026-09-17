@@ -10,12 +10,12 @@ export class ConstructorResolver {
     return resolutionProfiler.time("constructor", () => {
       if ("constructors" in type) {
         const index = type.constructors.findIndex((constructor) => arity === undefined || constructor.parameterTypes.length === arity);
-        resolutionProfiler.candidates(index < 0 ? type.constructors.length : index + 1, type.constructors.length);
+        resolutionProfiler.candidates(index < 0 ? type.constructors.length : index + 1, type.constructors.length, "constructor.jvm");
         return index >= 0 ? type.constructors[index] : undefined;
       }
       if (!("members" in type)) return undefined;
       const index = type.members.findIndex((member) => member.kind === "constructor" && (arity === undefined || (member as ConstructorSymbol).parameterTypes.length === arity));
-      resolutionProfiler.candidates(index < 0 ? type.members.length : index + 1, type.members.length);
+      resolutionProfiler.candidates(index < 0 ? type.members.length : index + 1, type.members.length, "constructor.project");
       return (index >= 0 ? type.members[index] : undefined) as ConstructorSymbol | undefined;
     });
   }

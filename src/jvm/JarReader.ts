@@ -9,12 +9,18 @@ import { resolutionProfiler } from "../util/ResolutionProfiler.js";
 
 export class JvmSymbolIndex {
   private readonly classes = new Map<string, JvmClassSymbol>();
+  private readonly classesByPackage = new Map<string, JvmClassSymbol[]>();
+  private readonly classesByPackageAndName = new Map<string, Map<string, JvmClassSymbol[]>>();
   private readonly methodsByName = new Map<string, Array<{ className: string; method: JvmClassSymbol["methods"][number] }>>();
 
   addClass(symbol: JvmClassSymbol): void {
     const previous = this.classes.get(symbol.qualifiedName);
-    if (previous) this.removeMethodIndexEntries(previous);
+    if (previous) {
+      this.removeClassIndexEntry(previous);
+      this.removeMethodIndexEntries(previous);
+    }
     this.classes.set(symbol.qualifiedName, symbol);
+    this.addClassIndexEntry(symbol);
     for (const method of symbol.methods) {
       const baseName = method.name.split("-")[0];
       this.addMethodIndexEntry(method.name, symbol.qualifiedName, method);
@@ -23,6 +29,9 @@ export class JvmSymbolIndex {
   }
   addAll(symbols: Iterable<JvmClassSymbol>): void { for (const symbol of symbols) this.addClass(symbol); }
   getClass(name: string): JvmClassSymbol | undefined { return this.classes.get(name); }
+  getClasses(packageName: string, simpleName: string): JvmClassSymbol[] {
+    return this.classesByPackageAndName.get(packageName)?.get(simpleName) ?? [];
+  }
   getMethod(className: string, methodName: string): JvmClassSymbol["methods"][number] | undefined {
     return this.classes.get(className)?.methods.find((method) => method.name === methodName);
   }
@@ -40,15 +49,17 @@ export class JvmSymbolIndex {
         if (entry.className.startsWith(`${packageName}.`)) matches.push(entry);
       }
       resolutionProfiler.jvmMethodsScanned(scanned);
-      resolutionProfiler.candidates(scanned, matches.length);
+      resolutionProfiler.candidates(scanned, matches.length, "jvm.methodIndex");
       if (matches.length >= 10000) {
         console.error(`[KFC][Perf] Candidate.SPIKE symbol=${methodName} package=${packageName ?? ""} classesVisited=${classesVisited} candidates=${matches.length}`);
       }
       return matches;
     }
 
-    for (const symbol of this.classes.values()) {
-      if (packageName && !symbol.qualifiedName.startsWith(`${packageName}.`)) continue;
+    const symbols = packageName
+      ? this.classesByPackage.get(packageName) ?? []
+      : this.classes.values();
+    for (const symbol of symbols) {
       classesVisited += 1;
       for (const method of symbol.methods) {
         scanned += 1;
@@ -56,7 +67,7 @@ export class JvmSymbolIndex {
       }
     }
     resolutionProfiler.jvmMethodsScanned(scanned);
-    resolutionProfiler.candidates(scanned, matches.length);
+    resolutionProfiler.candidates(scanned, matches.length, "jvm.packageScan");
     if (matches.length >= 10000) {
       console.error(`[KFC][Perf] Candidate.SPIKE symbol= package=${packageName ?? ""} classesVisited=${classesVisited} candidates=${matches.length}`);
     }
@@ -66,6 +77,47 @@ export class JvmSymbolIndex {
     return this.classes.get(className)?.fields.find((field) => field.name === fieldName);
   }
   values(): IterableIterator<JvmClassSymbol> { return this.classes.values(); }
+
+  private addClassIndexEntry(symbol: JvmClassSymbol): void {
+    const separator = symbol.qualifiedName.lastIndexOf(".");
+    const packageName = separator < 0 ? "" : symbol.qualifiedName.slice(0, separator);
+    const simpleName = separator < 0 ? symbol.qualifiedName : symbol.qualifiedName.slice(separator + 1);
+    let packageClasses = this.classesByPackage.get(packageName);
+    if (!packageClasses) {
+      packageClasses = [];
+      this.classesByPackage.set(packageName, packageClasses);
+    }
+    packageClasses.push(symbol);
+
+    let byName = this.classesByPackageAndName.get(packageName);
+    if (!byName) {
+      byName = new Map();
+      this.classesByPackageAndName.set(packageName, byName);
+    }
+    const classes = byName.get(simpleName);
+    if (classes) classes.push(symbol);
+    else byName.set(simpleName, [symbol]);
+  }
+
+  private removeClassIndexEntry(symbol: JvmClassSymbol): void {
+    const separator = symbol.qualifiedName.lastIndexOf(".");
+    const packageName = separator < 0 ? "" : symbol.qualifiedName.slice(0, separator);
+    const simpleName = separator < 0 ? symbol.qualifiedName : symbol.qualifiedName.slice(separator + 1);
+    const packageClasses = this.classesByPackage.get(packageName);
+    if (packageClasses) {
+      const remainingPackageClasses = packageClasses.filter((candidate) => candidate !== symbol);
+      if (remainingPackageClasses.length === 0) this.classesByPackage.delete(packageName);
+      else this.classesByPackage.set(packageName, remainingPackageClasses);
+    }
+
+    const byName = this.classesByPackageAndName.get(packageName);
+    const classes = byName?.get(simpleName);
+    if (!byName || !classes) return;
+    const remaining = classes.filter((candidate) => candidate !== symbol);
+    if (remaining.length === 0) byName.delete(simpleName);
+    else byName.set(simpleName, remaining);
+    if (byName.size === 0) this.classesByPackageAndName.delete(packageName);
+  }
 
   private addMethodIndexEntry(methodName: string, className: string, method: JvmClassSymbol["methods"][number]): void {
     const entries = this.methodsByName.get(methodName);

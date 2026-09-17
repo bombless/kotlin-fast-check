@@ -59,6 +59,7 @@ export class ResolutionPass {
         constructorCalls: stats.constructorCalls, constructorMs: round(stats.constructorMs),
         symbolLookups: stats.symbolLookups, typeLookups: stats.typeLookups,
         functionLookups: stats.functionLookups, memberLookups: stats.memberLookups,
+        candidateScanBySource: JSON.stringify(stats.candidateScanBySource),
         scopeLookups: stats.scopeLookups, scopeTraversalSteps: stats.scopeTraversalSteps,
         maxTraversalDepth: stats.maxTraversalDepth,
         avgTraversalDepth: stats.scopeLookups ? round(stats.scopeTraversalSteps / stats.scopeLookups) : 0,

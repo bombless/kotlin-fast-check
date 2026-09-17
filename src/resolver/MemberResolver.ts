@@ -40,29 +40,29 @@ export class MemberResolver {
   private directProperty(type: ResolvedTypeSymbol, name: string): MemberSymbol | undefined {
     if ("fields" in type) {
       const fieldIndex = type.fields.findIndex((candidate) => candidate.name === name);
-      resolutionProfiler.candidates(fieldIndex < 0 ? type.fields.length : fieldIndex + 1, type.fields.length);
+      resolutionProfiler.candidates(fieldIndex < 0 ? type.fields.length : fieldIndex + 1, type.fields.length, "member.field");
       const field = fieldIndex >= 0 ? type.fields[fieldIndex] : undefined;
       if (field) return field;
       const getterIndex = type.methods.findIndex((candidate) => candidate.parameterTypes.length === 0 && (candidate.name === `get${capitalize(name)}` || candidate.name === `is${capitalize(name)}`));
-      resolutionProfiler.candidates(getterIndex < 0 ? type.methods.length : getterIndex + 1, type.methods.length);
+      resolutionProfiler.candidates(getterIndex < 0 ? type.methods.length : getterIndex + 1, type.methods.length, "member.getter");
       const getter = getterIndex >= 0 ? type.methods[getterIndex] : undefined;
       return getter;
     }
     if (!("members" in type)) return undefined;
     const propertyIndex = type.members.findIndex((member) => member.kind === "property" && member.name === name);
-    resolutionProfiler.candidates(propertyIndex < 0 ? type.members.length : propertyIndex + 1, type.members.length);
+    resolutionProfiler.candidates(propertyIndex < 0 ? type.members.length : propertyIndex + 1, type.members.length, "member.property");
     return propertyIndex >= 0 ? type.members[propertyIndex] : undefined;
   }
 
   private directMethod(type: ResolvedTypeSymbol, name: string, arity?: number): MemberSymbol | undefined {
     if ("methods" in type) {
       const methodIndex = type.methods.findIndex((method) => method.name === name && (arity === undefined || method.parameterTypes.length === arity));
-      resolutionProfiler.candidates(methodIndex < 0 ? type.methods.length : methodIndex + 1, type.methods.length);
+      resolutionProfiler.candidates(methodIndex < 0 ? type.methods.length : methodIndex + 1, type.methods.length, "member.method");
       return methodIndex >= 0 ? type.methods[methodIndex] : undefined;
     }
     if (!("members" in type)) return undefined;
     const functionIndex = type.members.findIndex((member) => member.kind === "function" && member.name === name && (arity === undefined || (member as FunctionSymbol).parameterTypes.length === arity));
-    resolutionProfiler.candidates(functionIndex < 0 ? type.members.length : functionIndex + 1, type.members.length);
+    resolutionProfiler.candidates(functionIndex < 0 ? type.members.length : functionIndex + 1, type.members.length, "member.function");
     return functionIndex >= 0 ? type.members[functionIndex] : undefined;
   }
 
