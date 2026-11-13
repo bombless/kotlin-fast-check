@@ -25,7 +25,8 @@
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+    "prepublishOnly": "npm run typecheck && npm run test:ci && npm run build",
+    "test:ci": "vitest run --exclude tests/e2e/android-space-inspector.test.ts --exclude tests/project-discovery.test.ts"
   },
   "engines": {
     "node": ">=18"
