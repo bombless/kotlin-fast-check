@@ -34,7 +34,7 @@ The extension is designed to stay lightweight: the analyzer remains a standalone
 The same analyzer is also distributed as an npm package so it can be used from any terminal:
 
 ```bash
-npm install -g kcheck
+npm install -g kotlin-fast-check
 ```
 
 Then run it against a Kotlin source file:
@@ -172,8 +172,8 @@ node dist/cli/main.js path/to/Main.kt
 
 ### npm package
 
-1. Publish the CLI as `kcheck` on npm.
-2. Support `npm install -g kcheck` and the `kcheck` executable.
+1. Publish the npm package as `kotlin-fast-check` with the `kcheck` executable.
+2. Support `npm install -g kotlin-fast-check` and the `kcheck` executable.
 3. Keep the CLI independently usable from the VS Code extension.
 4. Provide a stable programmatic API so other integrations can reuse the analyzer.
 
@@ -188,7 +188,7 @@ kcheck app/src/main/java/com/example/spaceinspector/MainActivity.kt
 Or install once and use it anywhere:
 
 ```bash
-npm install -g kcheck
+npm install -g kotlin-fast-check
 kcheck app/src/main/java/com/example/spaceinspector/MainActivity.kt
 ```
 
@@ -199,6 +199,6 @@ In VS Code, the long-term workflow is simply to click the **kcheck** icon in the
 `kcheck` is intended to become a small, fast Kotlin analysis engine with two first-class distribution surfaces:
 
 - **VS Code:** a frictionless one-click developer experience through the status bar and Output panel.
-- **npm:** a globally installable CLI available through `npm install -g kcheck`.
+- **npm:** a globally installable CLI available through `npm install -g kotlin-fast-check`.
 
 Both surfaces should share the same analyzer rather than maintaining separate implementations. That keeps the command line, editor integration, automation, and future tooling consistent as Kotlin semantic analysis grows.
