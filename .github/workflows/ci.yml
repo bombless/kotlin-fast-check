@@ -47,7 +47,7 @@ jobs:
         run: npm run typecheck
 
       - name: Run portable tests
-        run: npm test -- --exclude tests/e2e/android-space-inspector.test.ts --exclude tests/project-discovery.test.ts
+        run: npm run test:ci
 
       - name: Build
         run: npm run build
